@@ -1,18 +1,22 @@
 import json
 import os
 import time
+import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from loguru import logger
+import decrypt_tool
+import pic_tool
 
 
 class HuggingfaceWorker:
 
-    def __init__(self, job_service_cls, _files_dir, _huggingface_token):
+    def __init__(self, job_service_cls, _files_dir, _file_password, _huggingface_token):
         self.job_service_cls = job_service_cls
         self._files_dir = _files_dir
+        self._file_password = _file_password
         self._huggingface_token = _huggingface_token
         self.__worker_executor = ThreadPoolExecutor(1)
 
@@ -47,7 +51,7 @@ class HuggingfaceWorker:
                             job["status"] = 3
                             job_service_cls.finish_job(job)
                         elif job_type == 2:
-                            content = self._image_to_text(job)
+                            content = self._image_to_text(job, self._file_password)
                             job_result = dict()
                             job_result["contents"] = []
                             job_result["contents"].append(content)
@@ -56,7 +60,7 @@ class HuggingfaceWorker:
                             job["status"] = 3
                             job_service_cls.finish_job(job)
                     except Exception as e:
-                        logger.error("Error: " + str(e))
+                        logger.error("Error: " + str(e) + "\n" + traceback.format_exc())
                         job_result = dict()
                         job_result["contents"] = []
                         job_result["attachment_uris"] = []
@@ -66,7 +70,7 @@ class HuggingfaceWorker:
                         job_service_cls.finish_job(job)
                         time.sleep(30)
             except Exception as e:
-                logger.error("Error: " + str(e))
+                logger.error("Error: " + str(e) + "\n" + traceback.format_exc())
                 time.sleep(30)
 
     def _text_to_image(self, job):
@@ -104,15 +108,32 @@ class HuggingfaceWorker:
 
         return "engine://" + file_id, filename
 
-    def _image_to_text(self, job):
+    def _image_to_text(self, job, _file_password):
         api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
         headers = {"Authorization": "Bearer " + self._huggingface_token}
 
         uri = job["param"]["attachment_uris"][0]
         file_id = uri.replace("engine://", "")
+
+        meta_file_path = os.path.join(self._files_dir, file_id + "_meta.json")
+        with open(meta_file_path, "rb") as f:
+            meta_data = f.read()
+            meta_data_json = json.loads(meta_data)
+            filename = meta_data_json.get("filename", None)
+            encrypt = meta_data_json.get("encrypt", "0")
+
         file_path = os.path.join(self._files_dir, file_id)
         with open(file_path, "rb") as f:
             data = f.read()
+
+        if encrypt == "1":
+            if filename is None:
+                raise Exception("Filename is None")
+            if _file_password is None:
+                raise Exception("File is encrypted, but password is None")
+            data = decrypt_tool.decrypt(_file_password, filename, data)
+
+        data = pic_tool.resize_pic(data)
 
         response = requests.post(api_url, headers=headers, data=data, timeout=60)
         if response.status_code == 503:

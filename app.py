@@ -42,8 +42,6 @@ if not os.path.exists(_jobs_data_dir):
 if not os.path.exists(_files_dir):
     os.mkdir(_files_dir)
 
-_supported_job_types = [1, 2, 10000]
-
 _engine = create_engine("sqlite:///" + _engine_data_dir + "/main.db", echo=True)
 with _engine.connect() as create_con:
     create_con.exec_driver_sql(
@@ -440,11 +438,27 @@ class MainHandler(tornado.web.RequestHandler):
 
         if len(_client_ids) > 0:
             if client_id not in _client_ids:
-                self.write({"status": "error", "message": "client_id not allowed"})
+                self.set_status(403)
+                self.write({"status": "error", "message": "client_id not allowed", "supported_job_types": [],
+                            "custom_job_types": []})
                 return
         self.write({
             "status": "ok",
-            "supported_job_types": _supported_job_types
+            "supported_job_types": [1, 2, 10000],
+            "custom_job_types": [
+                {
+                    "name": "Custom AI Engine task",
+                    "type": 10000,
+                },
+                {
+                    "name": "Test",
+                    "type": 10001,
+                },
+                {
+                    "name": "Test2",
+                    "type": 10002,
+                }
+            ]
         })
 
 
@@ -453,6 +467,7 @@ class GetJobsHandler(tornado.web.RequestHandler):
         client_id = self.get_query_argument("client_id")
         if len(_client_ids) > 0:
             if client_id not in _client_ids:
+                self.set_status(403)
                 self.write({"status": "error", "message": "client_id not allowed"})
                 return
 
@@ -466,6 +481,7 @@ class CreateJobHandler(tornado.web.RequestHandler):
         client_id = self.get_query_argument("client_id")
         if len(_client_ids) > 0:
             if client_id not in _client_ids:
+                self.set_status(403)
                 self.write({"status": "error", "message": "client_id not allowed"})
                 return
 
@@ -481,6 +497,7 @@ class GetUndoJobsHandler(tornado.web.RequestHandler):
         worker_id = self.get_query_argument("worker_id")
         if len(_worker_ids) > 0:
             if worker_id not in _worker_ids:
+                self.set_status(403)
                 self.write({"status": "error", "message": "worker_id not allowed"})
                 return
 
@@ -501,25 +518,31 @@ class GetJobHandler(tornado.web.RequestHandler):
         client_id = self.get_query_argument("client_id")
         if len(_client_ids) > 0:
             if client_id not in _client_ids:
+                self.set_status(403)
                 self.write({"status": "error", "message": "client_id not allowed"})
                 return
 
         job_id = self.get_query_argument("job_id")
         job = await _current_io_loop.run_in_executor(_service_executor, JobService.get_job, job_id)
         if job is None or job["client_id"] != client_id:
+            self.set_status(404)
             self.write({"status": "error", "message": "job not found"})
         else:
             self.write(job)
 
 
 class FinishJobHandler(tornado.web.RequestHandler):
-    def post(self):
+    async def post(self):
         worker_id = self.get_query_argument("worker_id")
         if len(_worker_ids) > 0:
             if worker_id not in _worker_ids:
+                self.set_status(403)
                 self.write({"status": "error", "message": "worker_id not allowed"})
                 return
-        self.write("unimplemented")
+
+        job = json.loads(self.request.body)
+        await _current_io_loop.run_in_executor(_service_executor, JobService.finish_job, job)
+        self.write({"status": "ok"})
 
 
 class ReOpenJobHandler(tornado.web.RequestHandler):
@@ -527,11 +550,13 @@ class ReOpenJobHandler(tornado.web.RequestHandler):
         client_id = self.get_query_argument("client_id")
         if len(_client_ids) > 0:
             if client_id not in _client_ids:
+                self.set_status(403)
                 self.write({"status": "error", "message": "client_id not allowed"})
                 return
         job_id = self.get_query_argument("job_id")
         job = await _current_io_loop.run_in_executor(_service_executor, JobService.update_job_status, job_id, 1)
         if job is None or job["client_id"] != client_id:
+            self.set_status(404)
             self.write({"status": "error", "message": "job not found"})
         else:
             self.write({"status": "ok"})
@@ -544,6 +569,7 @@ class FileUploadHandler(tornado.web.RequestHandler):
         client_id = self.get_query_argument("client_id")
         if len(_client_ids) > 0:
             if client_id not in _client_ids:
+                self.set_status(403)
                 self.write({"status": "error", "message": "client_id not allowed"})
                 return
 
@@ -559,9 +585,11 @@ class FileUploadHandler(tornado.web.RequestHandler):
 
         filename = self.get_query_argument("filename")
         content_type = self.request.headers["Content-Type"]
+        encrypt = self.get_query_argument("encrypt", "0")
         meta = {
             "filename": filename,
-            "content_type": content_type
+            "content_type": content_type,
+            "encrypt": encrypt
         }
 
         meta_file_path = os.path.join(_files_dir, self.file_id + "_meta.json")
@@ -580,6 +608,7 @@ class FileDownloadHandler(tornado.web.RequestHandler):
 
         if len(_client_ids) > 0:
             if client_id not in _client_ids:
+                self.set_status(403)
                 self.write({"status": "error", "message": "client_id not allowed"})
                 return
 
@@ -622,9 +651,10 @@ application = tornado.web.Application([
 application.listen(7860)
 logger.info("server started at port 7860")
 
+_file_password = os.environ.get("FILE_PASSWORD")
 _huggingface_token = os.environ.get("HUGGINGFACE_TOKEN")
 if _huggingface_token is not None:
-    engine_worker.HuggingfaceWorker(JobService, _files_dir, _huggingface_token).start()
+    engine_worker.HuggingfaceWorker(JobService, _files_dir, _file_password, _huggingface_token).start()
     logger.info("huggingface worker started")
 
 engine_worker.CustomWorker(JobService, _files_dir).start()

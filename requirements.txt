@@ -1,4 +1,6 @@
 SQLAlchemy==2.0.18
-aiofiles==23.1.0
-tornado==6.3.2
-loguru==0.7.0
+aiofiles<=23.1.0
+tornado<=6.3.2
+loguru<=0.7.0
+pycryptodome<=3.18.0
+Pillow<=10
