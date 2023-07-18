@@ -11,24 +11,25 @@ import aiofiles
 import shutil
 from loguru import logger
 
+import app_config
+
 import engine_worker
 
 # Configuration
 
 
-_client_id_list = os.environ.get("CLIENT_ID_LIST")
+_client_id_list = app_config.configurations["client_id_list"]
 _client_ids = set()
 if _client_id_list is not None:
     _client_ids = set(_client_id_list.split(","))
 
-_worker_id_list = os.environ.get("WORKER_ID_LIST")
+_worker_id_list = app_config.configurations["worker_id_list"]
 _worker_ids = set()
 if _worker_id_list is not None:
     _worker_ids = set(_worker_id_list.split(","))
 
 # Init
-_base_dir = os.path.dirname(os.path.abspath(__file__))
-_engine_data_dir = os.path.join(_base_dir, "engine_data")
+_engine_data_dir = app_config.configurations["engine_data_dir"]
 
 # avoid database too large, so we store job data in file system
 _jobs_data_dir = os.path.join(_engine_data_dir, "jobs_data")
@@ -444,21 +445,9 @@ class MainHandler(tornado.web.RequestHandler):
                 return
         self.write({
             "status": "ok",
-            "supported_job_types": [1, 2, 10000],
-            "custom_job_types": [
-                {
-                    "name": "Custom AI Engine task",
-                    "type": 10000,
-                },
-                {
-                    "name": "Test",
-                    "type": 10001,
-                },
-                {
-                    "name": "Test2",
-                    "type": 10002,
-                }
-            ]
+            "message": "running",
+            "supported_job_types": app_config.configurations["supported_job_types"],
+            "custom_job_types": app_config.configurations["custom_job_types"]
         })
 
 
@@ -651,8 +640,8 @@ application = tornado.web.Application([
 application.listen(7860)
 logger.info("server started at port 7860")
 
-_file_password = os.environ.get("FILE_PASSWORD")
-_huggingface_token = os.environ.get("HUGGINGFACE_TOKEN")
+_file_password = app_config.configurations["file_password"]
+_huggingface_token = app_config.configurations["huggingface_token"]
 if _huggingface_token is not None:
     engine_worker.HuggingfaceWorker(JobService, _files_dir, _file_password, _huggingface_token).start()
     logger.info("huggingface worker started")
